@@ -110,4 +110,5 @@ let g:DoxygenToolkit_authorName="Mathias Lorente"
 let g:DoxygenToolkit_licenseTag="My own license"   <-- !!! Does not end with "\<enter>"
 
 Example for go:
-![example_for_go](https://github.com/stonewesley/DoxygenToolkit.vim/raw/master/example/go.png)
+
+![example_for_go](./example/go.png)
