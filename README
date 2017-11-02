@@ -1,5 +1,11 @@
 This is a mirror of http://www.vim.org/scripts/script.php?script_id=987
 
+Add by stonewesley:
+20171102 - add support for golang function
+Use:
+- Put cursor before or at the line which define a function. Then, execute the
+  command :Dox. Some config may not work, like g:DoxygenToolkit_compactDoc
+
 Currently five purposes have been defined :
 
 Generates a doxygen license comment.  The tag text is configurable.
@@ -102,3 +108,6 @@ let g:DoxygenToolkit_blockHeader="----------------------------------------------
 let g:DoxygenToolkit_blockFooter="----------------------------------------------------------------------------"
 let g:DoxygenToolkit_authorName="Mathias Lorente"
 let g:DoxygenToolkit_licenseTag="My own license"   <-- !!! Does not end with "\<enter>"
+
+Example for go:
+![example_for_go](/example/go.png)
