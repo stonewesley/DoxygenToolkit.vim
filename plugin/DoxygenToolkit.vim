@@ -570,6 +570,16 @@ function! <SID>DoxygenCommentFunc()
     let l:namespacePattern = '\<namespace\>[[:blank:]]\+\zs'.l:someNamePattern.'\ze[[:blank:]]*\%('.l:endDocPattern.'\)'
 
     let l:types = { "class": l:classPattern, "struct": l:structPattern, "enum": l:enumPattern, "namespace": l:namespacePattern }
+  elseif( s:CheckFileType() == "go" )
+    " for go
+    let l:commentPattern   = '\%(/*\)\|\%(//\)\'
+
+    let l:recieverPattern = '\('.l:someNamePattern.'[[:blank:]]\+[\*]\='.l:someNamePattern.'\)\|'
+    let l:functionPattern = '\<func\>[[:blank:]]\+'.l:recieverPattern.'[[:blank:]]\+\zs[_[:alpha:]][_[:alnum:]]*\ze.*{'
+
+    let l:endDocPattern    = '\%(\<func\>[^{]*\)\@<!$'
+
+    let l:types = { "func": l:functionPattern }
   else
     let l:commentPattern   = '#\|^[[:blank:]]*"""'
 
@@ -585,7 +595,7 @@ function! <SID>DoxygenCommentFunc()
   let l:count            = 1
   let l:endDocFound      = 0
 
-  let l:doc = { "type": "", "name": "None", "params": [], "returns": "" , "templates": [], "throws": [] }
+  let l:doc = { "type": "", "name": "None", "params": [], "returns": "" , "templates": [], "throws": [], "reciever": "" }
 
   " Mark current line for future use
   mark d
@@ -666,8 +676,8 @@ function! <SID>DoxygenCommentFunc()
 
   " Look for the type
   for key in keys( l:types )
-    "call s:WarnMsg( "[DEBUG] buffer:_".l:lineBuffer."_, test:_".l:types[key] )
     let l:name = matchstr( l:lineBuffer, l:types[key] )
+    " call s:WarnMsg( "[DEBUG] buffer:_".l:lineBuffer."_, name:_".l:name."_, key:_".l:types[key] )
     if( l:name != "" )
       let l:doc.type = key
       let l:doc.name = l:name
@@ -676,6 +686,10 @@ function! <SID>DoxygenCommentFunc()
       if( key == "function" )
         "call s:WarnMsg( "HERE !!!".l:lineBuffer )
         call s:ParseFunctionParameters( l:lineBuffer, l:doc )
+      endif
+      " Go only.
+      if( key == "func" )
+        call s:ParseFunctionParametersForGo( l:lineBuffer, l:doc )
       endif
       break
     endif
@@ -722,122 +736,209 @@ function! <SID>DoxygenCommentFunc()
 
   " Below, write what we have found
   """""""""""""""""""""""""""""""""
+  if( s:CheckFileType() == "go" )
+      call s:InitializeParametersForGo()
 
-  call s:InitializeParameters()
-  if( s:CheckFileType() == "python" && l:doc.type == "function" && g:DoxygenToolkit_python_autoFunctionReturn == "yes" )
-    let l:doc.returns = "yes"
-  endif
-
-  " Header
-  exec "normal `d" 
-  if( g:DoxygenToolkit_blockHeader != "" )
-    exec "normal O".strpart( s:startCommentBlock, 0, 1 )
-    exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockHeader.s:endCommentBlock
-    exec "normal `d" 
-  endif
- 
-  " Brief
-  if( g:DoxygenToolkit_compactOneLineDoc =~ "yes" && l:doc.returns != "yes" && len( l:doc.params ) == 0 )
-    let s:compactOneLineDoc = "yes"
-    exec "normal O".strpart( s:startCommentTag, 0, 1 )
-    exec "normal A".strpart( s:startCommentTag, 1 ).g:DoxygenToolkit_briefTag_pre
-  else
-    let s:compactOneLineDoc = "no"
-    let l:insertionMode = s:StartDocumentationBlock()
-    exec "normal ".l:insertionMode.s:interCommentTag.g:DoxygenToolkit_briefTag_pre
-  endif
-  if( l:doc.name != "None" )
-    exec "normal A".l:doc.name." "
-  endif
-  exec "normal A".g:DoxygenToolkit_briefTag_post
-
-  " Mark the line where the cursor will be positionned.
-  mark d
-
-  " Arguments/parameters
-  if( g:DoxygenToolkit_compactDoc =~ "yes" )
-    let s:insertEmptyLine = 0
-  else
-    let s:insertEmptyLine = 1
-  endif
-  for param in l:doc.templates
-    if( s:insertEmptyLine == 1 )
-      exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
-      let s:insertEmptyLine = 0
-    endif
-    exec "normal o".s:interCommentTag.g:DoxygenToolkit_templateParamTag_pre.param.g:DoxygenToolkit_templateParamTag_post
-  endfor
-  for param in l:doc.params
-    if( s:insertEmptyLine == 1 )
-      exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
-      let s:insertEmptyLine = 0
-    endif
-    exec "normal o".s:interCommentTag.g:DoxygenToolkit_paramTag_pre.param.g:DoxygenToolkit_paramTag_post
-  endfor
-
-  " Returned value
-  if( l:doc.returns == "yes" )
-    if( g:DoxygenToolkit_compactDoc != "yes" )
-      exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
-    endif
-    exec "normal o".s:interCommentTag.g:DoxygenToolkit_returnTag
-  endif
-
-  " Exception (throw) values (cpp only)
-  if( len( l:doc.throws ) > 0 )
-    if( g:DoxygenToolkit_compactDoc =~ "yes" )
-      let s:insertEmptyLine = 0
-    else
-      let s:insertEmptyLine = 1
-    endif
-    for param in l:doc.throws
-      if( s:insertEmptyLine == 1 )
-        exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
-        let s:insertEmptyLine = 0
+      " Header
+      exec "normal `d" 
+      if( g:DoxygenToolkit_blockHeader != "" )
+        exec "normal O".strpart( s:startCommentBlock, 0, 1 )
+        exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockHeader.s:endCommentBlock
+        exec "normal `d" 
       endif
-      exec "normal o".s:interCommentTag.g:DoxygenToolkit_throwTag_pre.param.g:DoxygenToolkit_throwTag_post
-    endfor
-  endif
+     
+      " Brief
+      if( g:DoxygenToolkit_compactOneLineDoc =~ "yes" && l:doc.returns != "yes" && len( l:doc.params ) == 0 )
+        let s:compactOneLineDoc = "yes"
+        exec "normal O".strpart( s:startCommentTag, 0, 1 )
+        exec "normal A".strpart( s:startCommentTag, 1 ).l:doc.name.' - '
+      else
+        let s:compactOneLineDoc = "no"
+        let l:insertionMode = s:StartDocumentationBlock()
+        exec "normal ".l:insertionMode.s:interCommentTag.l:doc.name.' - '
+      endif
+      exec "normal A".g:DoxygenToolkit_briefTag_post
 
-  " End (if any) of documentation block.
-  if( s:endCommentTag != "" )
-    if( s:compactOneLineDoc =~ "yes" )
-      let s:execCommand = "A"
-      exec "normal A "
-      exec "normal $md"
-    else
-      let s:execCommand = "o"
-    endif
-    exec "normal ".s:execCommand.s:endCommentTag
-  endif
+      " Mark the line where the cursor will be positionned.
+      mark d
 
-  " Footer
-  if ( g:DoxygenToolkit_blockFooter != "" )
-    exec "normal o".strpart( s:startCommentBlock, 0, 1 )
-    exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockFooter.s:endCommentBlock
-  endif
-  exec "normal `d"
+      " Reciever
+      if( l:doc.reciever != "" )
+        exec "normal o".s:interCommentTag
+        exec "normal ".l:insertionMode.s:interCommentTag.'RECEIVER: '.l:doc.reciever
+      endif
 
-  call s:RestoreParameters()
-  if( s:compactOneLineDoc =~ "yes" && s:endCommentTag != "" )
-    startinsert
+      " Arguments/parameters
+      exec "normal o".s:interCommentTag
+      if( g:DoxygenToolkit_compactDoc =~ "yes" )
+        let s:insertEmptyLine = 0
+      else
+        let s:insertEmptyLine = 1
+      endif
+      exec "normal o".s:interCommentTag.'PARAMS:'
+      for param in l:doc.params
+        exec "normal o".s:interCommentTag.' - '.param.': '
+      endfor
+
+      " Returned value
+      exec "normal o".s:interCommentTag
+      if( l:doc.returns != "" )
+        let returngo = matchstr(l:doc.returns, '(\zs[^)]\+\ze)')
+        let returns = []
+        if(returngo == "")
+            call add(returns, l:doc.returns)
+        else
+            let returns = split(returngo, ',[[:blank:]]\+')
+        endif
+      exec "normal o".s:interCommentTag.'RETURNS:'
+        for ret in returns
+          exec "normal o".s:interCommentTag.' - '.ret.': '
+        endfor
+      endif
+
+      " End (if any) of documentation block.
+      if( s:endCommentTag != "" )
+        if( s:compactOneLineDoc =~ "yes" )
+          let s:execCommand = "A"
+          exec "normal A "
+          exec "normal $md"
+        else
+          let s:execCommand = "o"
+        endif
+        exec "normal ".s:execCommand.s:endCommentTag
+      endif
+
+      " Footer
+      if ( g:DoxygenToolkit_blockFooter != "" )
+        exec "normal o".strpart( s:startCommentBlock, 0, 1 )
+        exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockFooter.s:endCommentBlock
+      endif
+      exec "normal `d"
+
+      call s:RestoreParameters()
+      if( s:compactOneLineDoc =~ "yes" && s:endCommentTag != "" )
+        startinsert
+      else
+        startinsert!
+      endif
   else
-    startinsert!
+      call s:InitializeParameters()
+      if( s:CheckFileType() == "python" && l:doc.type == "function" && g:DoxygenToolkit_python_autoFunctionReturn == "yes" )
+        let l:doc.returns = "yes"
+      endif
+
+      " Header
+      exec "normal `d" 
+      if( g:DoxygenToolkit_blockHeader != "" )
+        exec "normal O".strpart( s:startCommentBlock, 0, 1 )
+        exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockHeader.s:endCommentBlock
+        exec "normal `d" 
+      endif
+     
+      " Brief
+      if( g:DoxygenToolkit_compactOneLineDoc =~ "yes" && l:doc.returns != "yes" && len( l:doc.params ) == 0 )
+        let s:compactOneLineDoc = "yes"
+        exec "normal O".strpart( s:startCommentTag, 0, 1 )
+        exec "normal A".strpart( s:startCommentTag, 1 ).g:DoxygenToolkit_briefTag_pre
+      else
+        let s:compactOneLineDoc = "no"
+        let l:insertionMode = s:StartDocumentationBlock()
+        exec "normal ".l:insertionMode.s:interCommentTag.g:DoxygenToolkit_briefTag_pre
+      endif
+      if( l:doc.name != "None" )
+        exec "normal A".l:doc.name." "
+      endif
+      exec "normal A".g:DoxygenToolkit_briefTag_post
+
+      " Mark the line where the cursor will be positionned.
+      mark d
+
+      " Arguments/parameters
+      if( g:DoxygenToolkit_compactDoc =~ "yes" )
+        let s:insertEmptyLine = 0
+      else
+        let s:insertEmptyLine = 1
+      endif
+      for param in l:doc.templates
+        if( s:insertEmptyLine == 1 )
+          exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
+          let s:insertEmptyLine = 0
+        endif
+        exec "normal o".s:interCommentTag.g:DoxygenToolkit_templateParamTag_pre.param.g:DoxygenToolkit_templateParamTag_post
+      endfor
+      for param in l:doc.params
+        if( s:insertEmptyLine == 1 )
+          exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
+          let s:insertEmptyLine = 0
+        endif
+        exec "normal o".s:interCommentTag.g:DoxygenToolkit_paramTag_pre.param.g:DoxygenToolkit_paramTag_post
+      endfor
+
+      " Returned value
+      if( l:doc.returns == "yes" )
+        if( g:DoxygenToolkit_compactDoc != "yes" )
+          exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
+        endif
+        exec "normal o".s:interCommentTag.g:DoxygenToolkit_returnTag
+      endif
+
+      " Exception (throw) values (cpp only)
+      if( len( l:doc.throws ) > 0 )
+        if( g:DoxygenToolkit_compactDoc =~ "yes" )
+          let s:insertEmptyLine = 0
+        else
+          let s:insertEmptyLine = 1
+        endif
+        for param in l:doc.throws
+          if( s:insertEmptyLine == 1 )
+            exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
+            let s:insertEmptyLine = 0
+          endif
+          exec "normal o".s:interCommentTag.g:DoxygenToolkit_throwTag_pre.param.g:DoxygenToolkit_throwTag_post
+        endfor
+      endif
+
+      " End (if any) of documentation block.
+      if( s:endCommentTag != "" )
+        if( s:compactOneLineDoc =~ "yes" )
+          let s:execCommand = "A"
+          exec "normal A "
+          exec "normal $md"
+        else
+          let s:execCommand = "o"
+        endif
+        exec "normal ".s:execCommand.s:endCommentTag
+      endif
+
+      " Footer
+      if ( g:DoxygenToolkit_blockFooter != "" )
+        exec "normal o".strpart( s:startCommentBlock, 0, 1 )
+        exec "normal A".strpart( s:startCommentBlock, 1 ).g:DoxygenToolkit_blockFooter.s:endCommentBlock
+      endif
+      exec "normal `d"
+
+      call s:RestoreParameters()
+      if( s:compactOneLineDoc =~ "yes" && s:endCommentTag != "" )
+        startinsert
+      else
+        startinsert!
+      endif
   endif
+
 
   " DEBUG purpose only
-  "call s:WarnMsg( "Found a ".l:doc.type." named ".l:doc.name." (env: ".s:CheckFileType().")." )
-  "if( l:doc.type == "function" )
-  "  let l:funcReturn = "returns something."
-  "  if( l:doc.returns == "" )
-  "    let l:funcReturn = "doesn't return anything."
-  "  endif
-  "  call s:WarnMsg( " - which ".l:funcReturn )
-  "  call s:WarnMsg( " - which has following parameter(s):" )
-  "  for param in l:doc.params
-  "    call s:WarnMsg( "   - ".param )
-  "  endfor
-  "endif
+  call s:WarnMsg( "Found a ".l:doc.type." named ".l:doc.name." (env: ".s:CheckFileType().")." )
+  if( l:doc.type == "function" )
+    let l:funcReturn = "returns something."
+    if( l:doc.returns == "" )
+      let l:funcReturn = "doesn't return anything."
+    endif
+    call s:WarnMsg( " - which ".l:funcReturn )
+    call s:WarnMsg( " - which has following parameter(s):" )
+    for param in l:doc.params
+      call s:WarnMsg( "   - ".param )
+    endfor
+  endif
 
 endfunction
 
@@ -894,6 +995,8 @@ endfunction
 function! s:CheckFileType()
   if( &filetype == "python" )
     let l:fileType       = "python"
+  elseif( &filetype == "go" )
+    let l:fileType       = "go"
   else
     let l:fileType       = "cpp"
   endif
@@ -995,6 +1098,37 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
 endfunction
 
 
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" only fo go
+" Parse the buffer and set the doc parameter.
+" - Functions which return pointer to function are not supported.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:ParseFunctionParametersForGo( lineBuffer, doc )
+  " call s:WarnMsg( 'IN__'.a:lineBuffer )
+  " match reciever, params, returns
+  let recieverM = '\<func\>[[:blank:]]\+(\zs[^)]\+\ze)'
+  let a:doc.reciever = matchstr( a:lineBuffer, recieverM )
+
+  " params
+  if(a:doc.reciever == "")
+      let paramM = '\<func\>[[:blank:]]\+\<'.a:doc.name.'\>'
+  else
+      let paramM = '\<func\>[[:blank:]]\+\M('.a:doc.reciever.')\m[[:blank:]]\+\<'.a:doc.name.'\>'
+  endif
+  let paramsgo = matchstr( a:lineBuffer, paramM.'(\zs[^)]\+\ze)' )
+  let params = split(paramsgo, ',[[:blank:]]\+')
+
+  for param in l:params
+    call add( a:doc.params, param )
+    "call s:WarnMsg( '[DEBUG]:OUT_'.param )
+  endfor
+
+  " returns
+  let returnM = paramM.'([^)]*)[[:blank:]]\+\zs[^}]\+\ze[[:blank:]]\+{'
+  let a:doc.returns = matchstr( a:lineBuffer, returnM )
+endfunction
+
+
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Parse given parameter and return its name.
 " It is easy to do unless you use function's pointers...
@@ -1089,6 +1223,25 @@ function! s:InitializeParameters()
     let s:interCommentBlock = "# "
     let s:endCommentBlock   = ""
   endif
+
+  " Backup standard comment expension and indentation
+  let s:commentsBackup = &comments
+  let &comments        = ""
+  let s:cinoptionsBackup = &cinoptions
+  let &cinoptions        = g:DoxygenToolkit_cinoptions
+  " Compatibility with c/c++ IDE plugin
+  let s:timeoutlenBackup = &timeoutlen
+  let &timeoutlen = 0
+endfunction
+
+" for go only
+function! s:InitializeParametersForGo()
+  let s:startCommentTag   = "/*" 
+  let s:interCommentTag   = g:DoxygenToolkit_interCommentTag
+  let s:endCommentTag     = g:DoxygenToolkit_endCommentTag
+  let s:startCommentBlock = g:DoxygenToolkit_startCommentBlock 
+  let s:interCommentBlock = g:DoxygenToolkit_interCommentBlock
+  let s:endCommentBlock   = g:DoxygenToolkit_endCommentBlock
 
   " Backup standard comment expension and indentation
   let s:commentsBackup = &comments
